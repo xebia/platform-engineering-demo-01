@@ -1,7 +1,9 @@
 # Platform Engineering example — Score -> Docker Compose / Kubernetes (kind)
 #
 # Single source of truth: workloads/<name>/score.yaml
-# Generated artifacts land in dist/ (gitignored).
+# Generated artifacts land in each workload's dist/ folder:
+#   workloads/<name>/dist/k8s/manifests.yaml  -> committed k8s manifests (ArgoCD source)
+#   workloads/<name>/dist/docker/compose.yaml -> local-dev compose (gitignored)
 
 # ---- configuration ---------------------------------------------------------
 WORKLOAD      ?= hello-world
@@ -16,9 +18,10 @@ ARGOCD_UI_PORT?= 8081
 HOST_PORT     ?= 8080
 CONTAINER_PORT?= 8080
 
-DIST          := dist
-COMPOSE_FILE  := $(DIST)/compose.yaml
-MANIFESTS     := $(DIST)/manifests.yaml
+# generated artifacts, kept in the workload's dist/ folder
+DIST_DIR      := $(WORKLOAD_DIR)/dist
+COMPOSE_FILE  := $(DIST_DIR)/docker/compose.yaml
+MANIFESTS     := $(DIST_DIR)/k8s/manifests.yaml
 
 .DEFAULT_GOAL := help
 
@@ -35,21 +38,20 @@ init: ## Initialise score-compose and score-k8s local state (one-time)
 
 # ---- generate (Score -> artifacts) -----------------------------------------
 .PHONY: compose
-compose: $(DIST) ## Generate dist/compose.yaml from score.yaml
+compose: ## Generate the local-dev compose.yaml from score.yaml
+	mkdir -p $(dir $(COMPOSE_FILE))
 	score-compose generate $(SCORE_FILE) \
 		--build 'web={"context":"$(BUILD_CONTEXT)"}' \
 		--publish '$(HOST_PORT):$(WORKLOAD):$(CONTAINER_PORT)' \
 		-o $(COMPOSE_FILE)
 
 .PHONY: manifests
-manifests: $(DIST) ## Generate dist/manifests.yaml from score.yaml
+manifests: ## Render score.yaml -> committed k8s manifests (ArgoCD source of truth)
+	mkdir -p $(dir $(MANIFESTS))
 	score-k8s generate $(SCORE_FILE) -o $(MANIFESTS)
 
 .PHONY: generate
 generate: compose manifests ## Generate both compose + k8s artifacts
-
-$(DIST):
-	mkdir -p $(DIST)
 
 # ---- local dev (Docker Compose) --------------------------------------------
 .PHONY: build
@@ -91,8 +93,8 @@ argocd: cluster ## Install ArgoCD into the kind cluster (GitOps control plane)
 	helm upgrade --install argocd argo/argo-cd -n $(ARGOCD_NS) --wait --timeout 5m
 
 .PHONY: bootstrap
-bootstrap: argocd ## Apply the App-of-Apps so ArgoCD installs the platform addons
-	kubectl apply -f platform/gitops/bootstrap/addons.yaml
+bootstrap: argocd ## Apply the App-of-Apps roots (platform addons + workloads)
+	kubectl apply -f platform/gitops/bootstrap/
 
 .PHONY: argocd-password
 argocd-password: ## Print the ArgoCD initial admin password
@@ -105,8 +107,8 @@ argocd-ui: ## Port-forward the ArgoCD UI to https://localhost:$(ARGOCD_UI_PORT)
 
 # ---- housekeeping ----------------------------------------------------------
 .PHONY: clean
-clean: ## Remove generated artifacts
-	rm -rf $(DIST)
+clean: ## Remove the local-dev compose artifact (k8s manifests are committed, kept)
+	rm -rf $(dir $(COMPOSE_FILE))
 
 .PHONY: destroy
 destroy: ## Delete the kind cluster

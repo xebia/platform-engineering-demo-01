@@ -1,1 +1,7 @@
 .score-*
+
+# local-dev compose is generated from score.yaml; dist/k8s manifests are committed
+workloads/*/dist/docker/
+
+# old top-level generated dir (now per-workload dist/)
+/dist/
