@@ -1,0 +1,42 @@
+# Grafana — dashboards. Pre-wired with Prometheus + Loki datasources so the
+# stack works out of the box. Admin password is "admin" for the demo only.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: grafana
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://grafana.github.io/helm-charts
+    chart: grafana
+    targetRevision: 10.5.15
+    helm:
+      releaseName: grafana
+      valuesObject:
+        adminPassword: admin
+        datasources:
+          datasources.yaml:
+            apiVersion: 1
+            datasources:
+              - name: Prometheus
+                type: prometheus
+                access: proxy
+                url: http://prometheus-server.observability.svc.cluster.local
+                isDefault: true
+              - name: Loki
+                type: loki
+                access: proxy
+                url: http://loki.observability.svc.cluster.local:3100
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

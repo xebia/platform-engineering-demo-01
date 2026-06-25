@@ -1,0 +1,66 @@
+# Loki — log aggregation, single-binary (standalone) mode with filesystem
+# storage. The scalable read/write/backend paths and caches are disabled so it
+# runs as one pod, which is all a kind demo needs.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: loki
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://grafana.github.io/helm-charts
+    chart: loki
+    targetRevision: 7.0.0
+    helm:
+      releaseName: loki
+      valuesObject:
+        deploymentMode: SingleBinary
+        loki:
+          auth_enabled: false
+          commonConfig:
+            replication_factor: 1
+          storage:
+            type: filesystem
+          schemaConfig:
+            configs:
+              - from: "2024-04-01"
+                store: tsdb
+                object_store: filesystem
+                schema: v13
+                index:
+                  prefix: index_
+                  period: 24h
+        singleBinary:
+          replicas: 1
+        # disable the scalable-mode components
+        backend:
+          replicas: 0
+        read:
+          replicas: 0
+        write:
+          replicas: 0
+        # caches need memcached — not worth it for a demo
+        chunksCache:
+          enabled: false
+        resultsCache:
+          enabled: false
+        # trim extras
+        gateway:
+          enabled: false
+        lokiCanary:
+          enabled: false
+        test:
+          enabled: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
