@@ -1,0 +1,25 @@
+# App-of-Apps: the single Application the platform team applies to bootstrap
+# all Day-2 addons. It watches platform/gitops/addons/ in this repo and creates
+# one child Application per file found there (Gatekeeper, and future addons).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-addons
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/xebia/platform-engineering-demo-01.git
+    targetRevision: HEAD
+    path: platform/gitops/addons
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
