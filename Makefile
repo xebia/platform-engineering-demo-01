@@ -28,8 +28,8 @@ help: ## Show this help
 
 .PHONY: init
 init: ## Initialise score-compose and score-k8s local state (one-time)
-	score-compose init
-	score-k8s init
+	score-compose init --no-sample
+	score-k8s init --no-sample
 
 # ---- generate (Score -> artifacts) -----------------------------------------
 .PHONY: compose
