@@ -11,6 +11,8 @@ BUILD_CONTEXT := ./$(WORKLOAD_DIR)/app
 
 IMAGE         ?= hello-world-app:0.1.0
 CLUSTER       ?= platform-engineering
+ARGOCD_NS     ?= argocd
+ARGOCD_UI_PORT?= 8081
 HOST_PORT     ?= 8080
 CONTAINER_PORT?= 8080
 
@@ -80,6 +82,23 @@ deploy: cluster load manifests ## Full deploy: cluster + image + apply manifests
 .PHONY: forward
 forward: ## Port-forward the workload to localhost:$(HOST_PORT)
 	kubectl port-forward deploy/$(WORKLOAD) $(HOST_PORT):$(CONTAINER_PORT)
+
+# ---- platform (ArgoCD / GitOps control plane) ------------------------------
+.PHONY: argocd
+argocd: cluster ## Install ArgoCD into the kind cluster (GitOps control plane)
+	helm repo add argo https://argoproj.github.io/argo-helm
+	helm repo update
+	kubectl create namespace $(ARGOCD_NS) --dry-run=client -o yaml | kubectl apply -f -
+	helm upgrade --install argocd argo/argo-cd -n $(ARGOCD_NS) --wait --timeout 5m
+
+.PHONY: argocd-password
+argocd-password: ## Print the ArgoCD initial admin password
+	@kubectl -n $(ARGOCD_NS) get secret argocd-initial-admin-secret \
+		-o jsonpath='{.data.password}' | base64 -d; echo
+
+.PHONY: argocd-ui
+argocd-ui: ## Port-forward the ArgoCD UI to https://localhost:$(ARGOCD_UI_PORT)
+	kubectl -n $(ARGOCD_NS) port-forward svc/argocd-server $(ARGOCD_UI_PORT):443
 
 # ---- housekeeping ----------------------------------------------------------
 .PHONY: clean
