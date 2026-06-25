@@ -87,7 +87,6 @@ forward: ## Port-forward the workload to localhost:$(HOST_PORT)
 .PHONY: argocd
 argocd: cluster ## Install ArgoCD into the kind cluster (GitOps control plane)
 	helm repo add argo https://argoproj.github.io/argo-helm
-	helm repo update
 	kubectl create namespace $(ARGOCD_NS) --dry-run=client -o yaml | kubectl apply -f -
 	helm upgrade --install argocd argo/argo-cd -n $(ARGOCD_NS) --wait --timeout 5m
 
