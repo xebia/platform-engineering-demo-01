@@ -91,7 +91,7 @@ argocd: cluster ## Install ArgoCD into the kind cluster (GitOps control plane)
 	helm upgrade --install argocd argo/argo-cd -n $(ARGOCD_NS) --wait --timeout 5m
 
 .PHONY: bootstrap
-bootstrap: ## Apply the App-of-Apps so ArgoCD installs the platform addons
+bootstrap: argocd ## Apply the App-of-Apps so ArgoCD installs the platform addons
 	kubectl apply -f platform/gitops/bootstrap/addons.yaml
 
 .PHONY: argocd-password
