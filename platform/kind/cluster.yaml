@@ -1,0 +1,11 @@
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: platform-engineering
+nodes:
+  - role: control-plane
+    # extraPortMappings let you reach a NodePort / ingress controller from the
+    # host without `kubectl port-forward`. Uncomment when you add ingress.
+    # extraPortMappings:
+    #   - containerPort: 30080
+    #     hostPort: 8080
+    #     protocol: TCP
