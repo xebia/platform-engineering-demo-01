@@ -1,0 +1,35 @@
+# test environment — one Application per workload, built from each workload's
+# Kustomize overlay at workloads/<name>/envs/test. STATIC: this file does NOT
+# change on release or promotion. The deployed image tag lives in the app-side
+# overlay; this just tracks HEAD and points at the overlay path.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: test
+  namespace: argocd
+spec:
+  goTemplate: true
+  generators:
+    - git:
+        repoURL: https://github.com/xebia/platform-engineering-demo-01.git
+        revision: HEAD
+        directories:
+          - path: workloads/*/envs/test
+  template:
+    metadata:
+      name: '{{ index .path.segments 1 }}'
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/xebia/platform-engineering-demo-01.git
+        targetRevision: HEAD
+        path: '{{ .path.path }}'
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: '{{ index .path.segments 1 }}'
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true

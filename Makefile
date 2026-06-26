@@ -25,6 +25,7 @@ TEST_CLUSTER  ?= test
 STAGE_CLUSTER ?= stage
 PROD_CLUSTER  ?= prod
 CLUSTER       ?= $(TEST_CLUSTER)   # which cluster the generic primitives act on
+ENV           ?= test              # which GitOps env (test|stage|prod) to bootstrap
 
 # shared local registry (kind "local registry" pattern) — replaces `kind load`
 REG_NAME      ?= kind-registry
@@ -68,10 +69,12 @@ compose: ## Generate the local-dev compose.yaml from score.yaml
 			-o dist/docker/compose.yaml
 
 .PHONY: manifests
-manifests: ## Render score.yaml -> committed k8s manifests (ArgoCD source of truth)
+manifests: ## Render score.yaml -> committed k8s base (manifests + kustomization)
 	cd $(WORKLOAD_DIR) && { test -d .score-k8s || score-k8s init --no-sample; } && \
 		mkdir -p dist/k8s && \
-		score-k8s generate score.yaml -o dist/k8s/manifests.yaml
+		score-k8s generate score.yaml -o dist/k8s/manifests.yaml && \
+		printf 'apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n  - manifests.yaml\n' \
+			> dist/k8s/kustomization.yaml
 
 .PHONY: generate
 generate: compose manifests ## Generate both compose + k8s artifacts
@@ -137,22 +140,44 @@ dev-down: ## Destroy the ephemeral dev cluster
 # There is intentionally no "make deploy" to any of them — the image lives in the
 # shared registry and the platform (ArgoCD) does the deploy. Promotion = git.
 .PHONY: test-up test-down
-test-up: ## Provision the test cluster: ArgoCD + GitOps bootstrap
-	$(MAKE) bootstrap CLUSTER=$(TEST_CLUSTER)
+test-up: ## Provision the test cluster: ArgoCD + addons + test ApplicationSet
+	$(MAKE) bootstrap CLUSTER=$(TEST_CLUSTER) ENV=test
 test-down: ## Destroy the test cluster
 	kind delete cluster --name $(TEST_CLUSTER)
 
 .PHONY: stage-up stage-down
-stage-up: ## Provision the stage cluster: ArgoCD + GitOps bootstrap
-	$(MAKE) bootstrap CLUSTER=$(STAGE_CLUSTER)
+stage-up: ## Provision the stage cluster: ArgoCD + addons + stage ApplicationSet
+	$(MAKE) bootstrap CLUSTER=$(STAGE_CLUSTER) ENV=stage
 stage-down: ## Destroy the stage cluster
 	kind delete cluster --name $(STAGE_CLUSTER)
 
 .PHONY: prod-up prod-down
-prod-up: ## Provision the prod cluster: ArgoCD + GitOps bootstrap
-	$(MAKE) bootstrap CLUSTER=$(PROD_CLUSTER)
+prod-up: ## Provision the prod cluster: ArgoCD + addons + prod ApplicationSet
+	$(MAKE) bootstrap CLUSTER=$(PROD_CLUSTER) ENV=prod
 prod-down: ## Destroy the prod cluster
 	kind delete cluster --name $(PROD_CLUSTER)
+
+# ---- release & promotion (tag-driven, trunk-based) -------------------------
+# A release builds+pushes immutable image tags and points test at the new tag.
+# Promotion advances an env's image tag. Both touch only the app-side overlays
+# (workloads/*/envs/<env>) — the platform ApplicationSets never change.
+.PHONY: release
+release: ## Cut a release: build+push images :VERSION and point test at it
+	@test -n "$(VERSION)" || { echo "usage: make release VERSION=x.y.z"; exit 1; }
+	bash platform/kind/registry.sh
+	@for w in $(WORKLOADS); do \
+		docker build -t localhost:$(REG_PORT)/$$w-app:$(VERSION) ./workloads/$$w/app && \
+		docker push localhost:$(REG_PORT)/$$w-app:$(VERSION); \
+	done
+	bash platform/scripts/set-version.sh test $(VERSION)
+	@echo ">> Release $(VERSION) pushed; test overlay updated. Commit + 'git tag v$(VERSION)' to record it."
+
+.PHONY: promote
+promote: ## Promote an env to a version: make promote ENV=stage VERSION=x.y.z
+	@test -n "$(ENV)" || { echo "usage: make promote ENV=stage|prod VERSION=x.y.z"; exit 1; }
+	@test -n "$(VERSION)" || { echo "usage: make promote ENV=stage|prod VERSION=x.y.z"; exit 1; }
+	bash platform/scripts/set-version.sh $(ENV) $(VERSION)
+	@echo ">> $(ENV) overlay set to $(VERSION). Commit + push; ArgoCD syncs $(ENV)."
 
 # ---- platform (ArgoCD / GitOps control plane) ------------------------------
 .PHONY: argocd
@@ -164,8 +189,9 @@ argocd: cluster ## Install ArgoCD into $(CLUSTER) (GitOps control plane)
 		--kube-context kind-$(CLUSTER) --wait --timeout 5m
 
 .PHONY: bootstrap
-bootstrap: argocd ## Apply the App-of-Apps roots (platform addons + workloads)
-	kubectl --context kind-$(CLUSTER) apply -f platform/gitops/bootstrap/
+bootstrap: argocd ## Apply platform addons + the $(ENV) workloads ApplicationSet to $(CLUSTER)
+	kubectl --context kind-$(CLUSTER) apply -f platform/gitops/bootstrap/addons.yaml
+	kubectl --context kind-$(CLUSTER) apply -f platform/gitops/envs/$(ENV).yaml
 
 .PHONY: argocd-password
 argocd-password: ## Print the ArgoCD initial admin password
