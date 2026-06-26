@@ -5,7 +5,7 @@ metadata:
   annotations:
     k8s.score.dev/workload-name: hello-world
   labels:
-    app.kubernetes.io/instance: hello-world-d5d7891797
+    app.kubernetes.io/instance: hello-world-4b3ad244d0
     app.kubernetes.io/managed-by: score-k8s
     app.kubernetes.io/name: hello-world
   name: hello-world
@@ -16,7 +16,7 @@ spec:
       protocol: TCP
       targetPort: 8080
   selector:
-    app.kubernetes.io/instance: hello-world-d5d7891797
+    app.kubernetes.io/instance: hello-world-4b3ad244d0
 status:
   loadBalancer: {}
 ---
@@ -26,21 +26,21 @@ metadata:
   annotations:
     k8s.score.dev/workload-name: hello-world
   labels:
-    app.kubernetes.io/instance: hello-world-d5d7891797
+    app.kubernetes.io/instance: hello-world-4b3ad244d0
     app.kubernetes.io/managed-by: score-k8s
     app.kubernetes.io/name: hello-world
   name: hello-world
 spec:
   selector:
     matchLabels:
-      app.kubernetes.io/instance: hello-world-d5d7891797
+      app.kubernetes.io/instance: hello-world-4b3ad244d0
   strategy: {}
   template:
     metadata:
       annotations:
         k8s.score.dev/workload-name: hello-world
       labels:
-        app.kubernetes.io/instance: hello-world-d5d7891797
+        app.kubernetes.io/instance: hello-world-4b3ad244d0
         app.kubernetes.io/managed-by: score-k8s
         app.kubernetes.io/name: hello-world
     spec:

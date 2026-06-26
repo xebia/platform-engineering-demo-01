@@ -11,17 +11,25 @@ WORKLOAD_DIR  := workloads/$(WORKLOAD)
 SCORE_FILE    := $(WORKLOAD_DIR)/score.yaml
 BUILD_CONTEXT := ./$(WORKLOAD_DIR)/app
 
-IMAGE         ?= hello-world-app:0.1.0
+# per-workload overrides (optional): workloads/<name>/workload.mk
+-include $(WORKLOAD_DIR)/workload.mk
+
+# convention-based fallbacks — apply only if workload.mk didn't set them
+IMAGE         ?= $(WORKLOAD)-app:0.1.0
+HOST_PORT     ?= 8080
+CONTAINER_PORT?= 8080
+
 CLUSTER       ?= platform-engineering
 ARGOCD_NS     ?= argocd
 ARGOCD_UI_PORT?= 8081
-HOST_PORT     ?= 8080
-CONTAINER_PORT?= 8080
 
 # generated artifacts, kept in the workload's dist/ folder
 DIST_DIR      := $(WORKLOAD_DIR)/dist
 COMPOSE_FILE  := $(DIST_DIR)/docker/compose.yaml
 MANIFESTS     := $(DIST_DIR)/k8s/manifests.yaml
+
+# every workload folder (for the *-all fan-out targets)
+WORKLOADS     := $(notdir $(wildcard workloads/*))
 
 .DEFAULT_GOAL := help
 
@@ -32,26 +40,38 @@ help: ## Show this help
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
 
 .PHONY: init
-init: ## Initialise score-compose and score-k8s local state (one-time)
-	score-compose init --no-sample
-	score-k8s init --no-sample
+init: ## Initialise per-workload score state (isolates each app's project)
+	cd $(WORKLOAD_DIR) && score-compose init --no-sample && score-k8s init --no-sample
 
 # ---- generate (Score -> artifacts) -----------------------------------------
+# Both generate commands run *inside* the workload dir so each app gets its own
+# .score-* state — otherwise score's shared project state leaks every workload's
+# resources into every output file.
 .PHONY: compose
 compose: ## Generate the local-dev compose.yaml from score.yaml
-	mkdir -p $(dir $(COMPOSE_FILE))
-	score-compose generate $(SCORE_FILE) \
-		--build 'web={"context":"$(BUILD_CONTEXT)"}' \
-		--publish '$(HOST_PORT):$(WORKLOAD):$(CONTAINER_PORT)' \
-		-o $(COMPOSE_FILE)
+	cd $(WORKLOAD_DIR) && { test -d .score-compose || score-compose init --no-sample; } && \
+		mkdir -p dist/docker && \
+		score-compose generate score.yaml \
+			--build 'web={"context":"./app"}' \
+			--publish '$(HOST_PORT):$(WORKLOAD):$(CONTAINER_PORT)' \
+			-o dist/docker/compose.yaml
 
 .PHONY: manifests
 manifests: ## Render score.yaml -> committed k8s manifests (ArgoCD source of truth)
-	mkdir -p $(dir $(MANIFESTS))
-	score-k8s generate $(SCORE_FILE) -o $(MANIFESTS)
+	cd $(WORKLOAD_DIR) && { test -d .score-k8s || score-k8s init --no-sample; } && \
+		mkdir -p dist/k8s && \
+		score-k8s generate score.yaml -o dist/k8s/manifests.yaml
 
 .PHONY: generate
 generate: compose manifests ## Generate both compose + k8s artifacts
+
+.PHONY: manifests-all compose-all build-all
+manifests-all: ## Render k8s manifests for ALL workloads
+	@for w in $(WORKLOADS); do $(MAKE) --no-print-directory WORKLOAD=$$w manifests; done
+compose-all: ## Generate compose for ALL workloads
+	@for w in $(WORKLOADS); do $(MAKE) --no-print-directory WORKLOAD=$$w compose; done
+build-all: ## Build the image for ALL workloads
+	@for w in $(WORKLOADS); do $(MAKE) --no-print-directory WORKLOAD=$$w build; done
 
 # ---- local dev (Docker Compose) --------------------------------------------
 .PHONY: build
@@ -60,11 +80,11 @@ build: ## Build the application image
 
 .PHONY: up
 up: compose ## Build + run locally via Docker Compose
-	docker compose -f $(COMPOSE_FILE) --project-directory . up --build
+	docker compose -f $(COMPOSE_FILE) --project-directory $(WORKLOAD_DIR) up --build
 
 .PHONY: down
 down: ## Stop the Docker Compose stack
-	docker compose -f $(COMPOSE_FILE) --project-directory . down
+	docker compose -f $(COMPOSE_FILE) --project-directory $(WORKLOAD_DIR) down
 
 # ---- kubernetes (kind) -----------------------------------------------------
 .PHONY: cluster

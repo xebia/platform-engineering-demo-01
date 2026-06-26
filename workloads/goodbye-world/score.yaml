@@ -1,0 +1,14 @@
+apiVersion: score.dev/v1b1
+
+metadata:
+  name: goodbye-world
+
+containers:
+  web:
+    image: goodbye-world-app:0.1.0
+
+service:
+  ports:
+    www:
+      port: 8080
+      targetPort: 8080
