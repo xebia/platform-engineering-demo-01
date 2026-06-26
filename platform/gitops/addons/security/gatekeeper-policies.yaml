@@ -1,0 +1,33 @@
+# Gatekeeper policies — ConstraintTemplates + Constraints, synced as their own
+# Application (separate from the Gatekeeper install so the controller is up
+# first). Lives under addons/ so the platform-addons App-of-Apps picks it up;
+# the actual policy manifests live in platform/gitops/policies (outside the
+# recursed addons dir) so only this Application manages them.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: gatekeeper-policies
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/xebia/platform-engineering-demo-01.git
+    targetRevision: HEAD
+    path: platform/gitops/policies
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: gatekeeper-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:                # the Constraint's CRD appears only after the template
+      limit: 10           # reconciles, so allow ArgoCD to retry until it exists
+      backoff:
+        duration: 15s
+        maxDuration: 5m
+        factor: 2

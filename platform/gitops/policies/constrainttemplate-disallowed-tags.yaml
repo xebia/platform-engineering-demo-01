@@ -1,0 +1,64 @@
+# ConstraintTemplate: defines the K8sDisallowedTags policy kind. Rego rejects
+# containers whose image uses a disallowed tag (e.g. latest) or has no explicit
+# tag at all (implicit :latest). Registry host:port (localhost:5001) is handled
+# by only inspecting the last path segment for the tag.
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8sdisallowedtags
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+    description: "Disallow specified image tags (e.g. latest) and require an explicit tag."
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sDisallowedTags
+      validation:
+        openAPIV3Schema:
+          type: object
+          properties:
+            tags:
+              type: array
+              items:
+                type: string
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8sdisallowedtags
+
+        violation[{"msg": msg}] {
+          container := containers[_]
+          tag := input.parameters.tags[_]
+          image_tag(container.image) == tag
+          msg := sprintf("container '%v' uses disallowed image tag '%v' (image: %v)", [container.name, tag, container.image])
+        }
+
+        violation[{"msg": msg}] {
+          container := containers[_]
+          not has_tag(container.image)
+          msg := sprintf("container '%v' must specify an explicit image tag; implicit ':latest' is not allowed (image: %v)", [container.name, container.image])
+        }
+
+        # containers from a bare Pod and from the pod template of workload kinds
+        containers[c] { c := input.review.object.spec.containers[_] }
+        containers[c] { c := input.review.object.spec.initContainers[_] }
+        containers[c] { c := input.review.object.spec.template.spec.containers[_] }
+        containers[c] { c := input.review.object.spec.template.spec.initContainers[_] }
+
+        # last path segment: "localhost:5001/app:0.1.0" -> "app:0.1.0"
+        last_segment(image) = seg {
+          parts := split(image, "/")
+          seg := parts[count(parts) - 1]
+        }
+
+        has_tag(image) {
+          contains(last_segment(image), ":")
+        }
+
+        image_tag(image) = tag {
+          seg := last_segment(image)
+          contains(seg, ":")
+          nt := split(seg, ":")
+          tag := nt[count(nt) - 1]
+        }
