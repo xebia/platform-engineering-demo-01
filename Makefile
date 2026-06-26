@@ -131,15 +131,28 @@ dev-up: ## Spin up the ephemeral dev cluster and deploy $(WORKLOAD) directly (ap
 dev-down: ## Destroy the ephemeral dev cluster
 	kind delete cluster --name $(DEV_CLUSTER)
 
-# ---- test environment (persistent, GitOps — promote via git push) ----------
-.PHONY: test-up
-test-up: ## Provision the test cluster: ArgoCD + GitOps bootstrap (one-time)
+# ---- GitOps environments (persistent — promote via git, not make) ----------
+# test, stage, prod are identical in shape: each is a kind cluster running
+# ArgoCD that syncs the App-of-Apps from git. *-up provisions, *-down destroys.
+# There is intentionally no "make deploy" to any of them — the image lives in the
+# shared registry and the platform (ArgoCD) does the deploy. Promotion = git.
+.PHONY: test-up test-down
+test-up: ## Provision the test cluster: ArgoCD + GitOps bootstrap
 	$(MAKE) bootstrap CLUSTER=$(TEST_CLUSTER)
+test-down: ## Destroy the test cluster
+	kind delete cluster --name $(TEST_CLUSTER)
 
-# NOTE: there is intentionally no "make deploy to test" and no image step here.
-# The image already lives in the shared registry (pushed during `make dev`/`push`)
-# and the test cluster is wired to it. Promotion to test = commit + git push;
-# ArgoCD syncs from git. The platform does the deploy, not make.
+.PHONY: stage-up stage-down
+stage-up: ## Provision the stage cluster: ArgoCD + GitOps bootstrap
+	$(MAKE) bootstrap CLUSTER=$(STAGE_CLUSTER)
+stage-down: ## Destroy the stage cluster
+	kind delete cluster --name $(STAGE_CLUSTER)
+
+.PHONY: prod-up prod-down
+prod-up: ## Provision the prod cluster: ArgoCD + GitOps bootstrap
+	$(MAKE) bootstrap CLUSTER=$(PROD_CLUSTER)
+prod-down: ## Destroy the prod cluster
+	kind delete cluster --name $(PROD_CLUSTER)
 
 # ---- platform (ArgoCD / GitOps control plane) ------------------------------
 .PHONY: argocd
