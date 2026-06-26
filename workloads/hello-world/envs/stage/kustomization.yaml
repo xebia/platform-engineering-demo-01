@@ -5,4 +5,4 @@ resources:
   - ../../dist/k8s
 images:
   - name: localhost:5001/hello-world-app
-    newTag: "0.1.0"
+    newTag: "0.1.2"
