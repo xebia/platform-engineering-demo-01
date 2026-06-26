@@ -5,7 +5,7 @@ metadata:
 
 containers:
   web:
-    image: hello-world-app:0.1.0
+    image: localhost:5001/hello-world-app:0.1.0
 
 service:
   ports:

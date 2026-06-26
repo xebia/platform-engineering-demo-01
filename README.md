@@ -115,7 +115,7 @@ from your laptop you must explicitly publish a host port.
 ## 3. Deploy to Kubernetes (kind)
 
 ```bash
-make deploy    # creates the cluster, builds + loads the image, applies manifests
+make deploy    # creates the cluster, builds + pushes the image, applies manifests
 make forward   # port-forward the workload to localhost:8080
 curl localhost:8080
 ```
@@ -124,23 +124,26 @@ curl localhost:8080
 <summary>What <code>make deploy</code> runs under the hood</summary>
 
 ```bash
-# create cluster (no-op if it already exists)
-kind create cluster --config platform/kind/cluster.yaml
+# create cluster (no-op if it exists) and wire it to the shared local registry
+kind create cluster --name platform-engineering --config platform/kind/cluster.yaml
+bash platform/kind/registry.sh platform-engineering
 
-# kind has no registry — build the image and load it into the cluster node
-docker build -t hello-world-app:0.1.0 ./workloads/hello-world/app
-kind load docker-image hello-world-app:0.1.0 --name platform-engineering
+# build + push to the shared registry (every cluster can pull from it)
+docker build -t localhost:5001/hello-world-app:0.1.0 ./workloads/hello-world/app
+docker push localhost:5001/hello-world-app:0.1.0
 
 # generate + apply
-score-k8s generate workloads/hello-world/score.yaml -o dist/manifests.yaml
-kubectl apply -f dist/manifests.yaml
-kubectl rollout status deploy/hello-world
+score-k8s generate workloads/hello-world/score.yaml -o workloads/hello-world/dist/k8s/manifests.yaml
+kubectl apply -n hello-world -f workloads/hello-world/dist/k8s/manifests.yaml
+kubectl rollout status -n hello-world deploy/hello-world
 ```
 
-**Image tags & kind:** we use a pinned tag (`hello-world-app:0.1.0`), which gets
-`imagePullPolicy: IfNotPresent`, so Kubernetes uses the image loaded into kind.
-Avoid `:latest`, which forces `imagePullPolicy: Always` and fails in kind (there
-is no registry to pull from).
+**Images via a shared local registry:** instead of `kind load`, one `registry:2`
+container (`localhost:5001`) is shared by every kind cluster (see
+`platform/kind/registry.sh`). Push an image once and any wired cluster can pull
+it. We use a pinned tag (`:0.1.0`); on a fresh node it pulls from the registry.
+Note: re-pushing the *same* tag won't refresh an already-running node (pull
+policy is `IfNotPresent`) — bump the tag, or recreate the ephemeral dev cluster.
 </details>
 
 Tear down the cluster with `make destroy`.

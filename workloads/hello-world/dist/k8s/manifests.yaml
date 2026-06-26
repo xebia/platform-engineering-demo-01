@@ -45,7 +45,7 @@ spec:
         app.kubernetes.io/name: hello-world
     spec:
       containers:
-        - image: hello-world-app:0.1.0
+        - image: localhost:5001/hello-world-app:0.1.0
           name: web
           resources: {}
 status: {}

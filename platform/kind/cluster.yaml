@@ -1,6 +1,14 @@
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
-name: platform-engineering
+# name is supplied via `kind create cluster --name <cluster>` so this one config
+# serves both the dev and test clusters.
+#
+# Wire containerd to the shared local registry (see platform/kind/registry.sh):
+# this enables per-registry hosts.toml under /etc/containerd/certs.d.
+containerdConfigPatches:
+  - |-
+    [plugins."io.containerd.grpc.v1.cri".registry]
+      config_path = "/etc/containerd/certs.d"
 nodes:
   - role: control-plane
     # extraPortMappings let you reach a NodePort / ingress controller from the

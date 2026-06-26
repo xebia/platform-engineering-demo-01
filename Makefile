@@ -15,11 +15,22 @@ BUILD_CONTEXT := ./$(WORKLOAD_DIR)/app
 -include $(WORKLOAD_DIR)/workload.mk
 
 # convention-based fallbacks — apply only if workload.mk didn't set them
-IMAGE         ?= $(WORKLOAD)-app:0.1.0
+IMAGE         ?= localhost:$(REG_PORT)/$(WORKLOAD)-app:0.1.0
 HOST_PORT     ?= 8080
 CONTAINER_PORT?= 8080
 
-CLUSTER       ?= platform-engineering
+# clusters (kind): dev = ephemeral/direct, test = persistent/GitOps
+DEV_CLUSTER   ?= dev
+TEST_CLUSTER  ?= test
+STAGE_CLUSTER ?= stage
+PROD_CLUSTER  ?= prod
+CLUSTER       ?= $(TEST_CLUSTER)   # which cluster the generic primitives act on
+
+# shared local registry (kind "local registry" pattern) — replaces `kind load`
+REG_NAME      ?= kind-registry
+REG_PORT      ?= 5001
+export REG_NAME REG_PORT
+
 ARGOCD_NS     ?= argocd
 ARGOCD_UI_PORT?= 8081
 
@@ -88,42 +99,69 @@ down: ## Stop the Docker Compose stack
 
 # ---- kubernetes (kind) -----------------------------------------------------
 .PHONY: cluster
-cluster: ## Create the kind cluster (no-op if it exists)
+cluster: ## Create the kind cluster $(CLUSTER) (no-op if it exists) + wire the registry
 	kind get clusters | grep -qx $(CLUSTER) || \
-		kind create cluster --config platform/kind/cluster.yaml
+		kind create cluster --name $(CLUSTER) --config platform/kind/cluster.yaml
+	bash platform/kind/registry.sh $(CLUSTER)
 
-.PHONY: load
-load: build ## Build image and load it into the kind cluster
-	kind load docker-image $(IMAGE) --name $(CLUSTER)
+.PHONY: push
+push: build ## Build the image and push it to the shared local registry
+	bash platform/kind/registry.sh
+	docker push $(IMAGE)
 
 .PHONY: deploy
-deploy: cluster load manifests ## Full deploy: cluster + image + apply manifests
-	kubectl apply -f $(MANIFESTS)
-	kubectl rollout status deploy/$(WORKLOAD)
+deploy: cluster push manifests ## Direct deploy to $(CLUSTER) (used by `make dev`)
+	kubectl --context kind-$(CLUSTER) create namespace $(WORKLOAD) --dry-run=client -o yaml \
+		| kubectl --context kind-$(CLUSTER) apply -f -
+	kubectl --context kind-$(CLUSTER) apply -n $(WORKLOAD) -f $(MANIFESTS)
+	kubectl --context kind-$(CLUSTER) rollout status -n $(WORKLOAD) deploy/$(WORKLOAD)
 
 .PHONY: forward
-forward: ## Port-forward the workload to localhost:$(HOST_PORT)
-	kubectl port-forward deploy/$(WORKLOAD) $(HOST_PORT):$(CONTAINER_PORT)
+forward: ## Port-forward the workload on $(CLUSTER) to localhost:$(HOST_PORT)
+	kubectl --context kind-$(CLUSTER) port-forward -n $(WORKLOAD) deploy/$(WORKLOAD) $(HOST_PORT):$(CONTAINER_PORT)
+
+# ---- dev environment (ephemeral, direct deploy — fast inner loop) ----------
+# App only: NO ArgoCD, NO Gatekeeper, NO observability. Those platform addons
+# live solely on the test cluster (installed by `make bootstrap`/`test-up`).
+.PHONY: dev-up
+dev-up: ## Spin up the ephemeral dev cluster and deploy $(WORKLOAD) directly (app only)
+	$(MAKE) deploy CLUSTER=$(DEV_CLUSTER)
+
+.PHONY: dev-down
+dev-down: ## Destroy the ephemeral dev cluster
+	kind delete cluster --name $(DEV_CLUSTER)
+
+# ---- test environment (persistent, GitOps — promote via git push) ----------
+.PHONY: test-up
+test-up: ## Provision the test cluster: ArgoCD + GitOps bootstrap (one-time)
+	$(MAKE) bootstrap CLUSTER=$(TEST_CLUSTER)
+
+# NOTE: there is intentionally no "make deploy to test" and no image step here.
+# The image already lives in the shared registry (pushed during `make dev`/`push`)
+# and the test cluster is wired to it. Promotion to test = commit + git push;
+# ArgoCD syncs from git. The platform does the deploy, not make.
 
 # ---- platform (ArgoCD / GitOps control plane) ------------------------------
 .PHONY: argocd
-argocd: cluster ## Install ArgoCD into the kind cluster (GitOps control plane)
+argocd: cluster ## Install ArgoCD into $(CLUSTER) (GitOps control plane)
 	helm repo add argo https://argoproj.github.io/argo-helm
-	kubectl create namespace $(ARGOCD_NS) --dry-run=client -o yaml | kubectl apply -f -
-	helm upgrade --install argocd argo/argo-cd -n $(ARGOCD_NS) --wait --timeout 5m
+	kubectl --context kind-$(CLUSTER) create namespace $(ARGOCD_NS) --dry-run=client -o yaml \
+		| kubectl --context kind-$(CLUSTER) apply -f -
+	helm upgrade --install argocd argo/argo-cd -n $(ARGOCD_NS) \
+		--kube-context kind-$(CLUSTER) --wait --timeout 5m
 
 .PHONY: bootstrap
 bootstrap: argocd ## Apply the App-of-Apps roots (platform addons + workloads)
-	kubectl apply -f platform/gitops/bootstrap/
+	kubectl --context kind-$(CLUSTER) apply -f platform/gitops/bootstrap/
 
 .PHONY: argocd-password
 argocd-password: ## Print the ArgoCD initial admin password
-	@kubectl -n $(ARGOCD_NS) get secret argocd-initial-admin-secret \
+	@kubectl --context kind-$(CLUSTER) -n $(ARGOCD_NS) get secret argocd-initial-admin-secret \
 		-o jsonpath='{.data.password}' | base64 -d; echo
 
 .PHONY: argocd-ui
 argocd-ui: ## Port-forward the ArgoCD UI to https://localhost:$(ARGOCD_UI_PORT)
-	kubectl -n $(ARGOCD_NS) port-forward svc/argocd-server $(ARGOCD_UI_PORT):443
+	kubectl --context kind-$(CLUSTER) -n $(ARGOCD_NS) port-forward svc/argocd-server $(ARGOCD_UI_PORT):443
 
 # ---- housekeeping ----------------------------------------------------------
 .PHONY: clean

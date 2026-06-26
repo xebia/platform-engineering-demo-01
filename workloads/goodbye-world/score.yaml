@@ -5,7 +5,7 @@ metadata:
 
 containers:
   web:
-    image: goodbye-world-app:0.1.0
+    image: localhost:5001/goodbye-world-app:0.1.0
 
 service:
   ports:
