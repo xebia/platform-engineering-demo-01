@@ -1,5 +1,5 @@
 # Platform Engineering Example — Score on Kubernetes (kind)
-
+ 
 A minimal platform-engineering walkthrough: a single Python "Hello, World" web
 app described **once** in [Score](https://score.dev) (`score.yaml`), from which we
 generate both a Docker Compose file for local development and Kubernetes manifests
